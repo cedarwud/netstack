@@ -17,7 +17,8 @@ nssf:
 #      nrf:
 #        - uri: http://127.0.0.10:7777
       scp:
-        - uri: http://scp:7777      nsi:
+        - uri: http://scp:7777
+      nsi:
         - uri: http://nrf:7777
           s_nssai:
             sst: 1

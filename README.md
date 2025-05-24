@@ -1,119 +1,321 @@
-📋 專案結構概覽
+make clean # 完全清理
+make up # 啟動核心服務  
+make start-ran # 啟動 RAN 模擬器
+make register-subscribers # 註冊用戶
+make test-connectivity # 測試 UE 網路連線
+make test-e2e # 完整 API 業務流程
+make test-performance # 系統效能
+make test-slice-switch # 網路切片切換
 
+# NetStack v1.0 - Open5GS + UERANSIM 雙 Slice 核心網堆疊
+
+🚀 **一鍵部署的 5G 核心網與 RAN 模擬器，支援 eMBB／uRLLC／mMTC 三切片架構**
+
+## 📋 專案概述
+
+NetStack 是基於 [Open5GS](https://github.com/open5gs/open5gs) 和 [UERANSIM](https://github.com/aligungr/UERANSIM) 的完整 5G 核心網堆疊，提供：
+
+-   **三 Network Slice 支援**：eMBB (sst=1, sd=0x111111)、uRLLC (sst=2, sd=0x222222) 和 mMTC (sst=3, sd=0x333333)
+-   **FastAPI 管理介面**：RESTful API 用於 UE 管理和 Slice 切換
+-   **容器化部署**：`docker compose up -d` 一鍵啟動
+-   **自動化測試**：E2E 測試腳本與效能指標收集
+-   **CI/CD 整合**：GitHub Actions 自動化建置與部署
+
+## 🏗️ 架構設計
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   SimWorld      │◄──►│   NetStack API   │◄──►│   Open5GS Core  │
+│   (外部系統)     │    │   (FastAPI)      │    │   (5GC Network) │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │                         │
+                                ▼                         ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   監控與指標     │    │   UERANSIM RAN  │
+                       │   (Prometheus)   │    │   (gNB + UE)    │
+                       └──────────────────┘    └─────────────────┘
+```
+
+### 核心組件
+
+-   **Open5GS 5GC**：AMF, SMF, UPF, NSSF, PCF, UDM, UDR, AUSF, BSF, NRF, SCP
+-   **UERANSIM**：模擬 gNodeB 和 UE 設備
+-   **NetStack API**：基於 Hexagonal Architecture 的管理 API
+-   **MongoDB**：用戶資料庫與配置儲存
+-   **Prometheus**：效能指標收集
+
+## 🚀 快速開始
+
+### 前置需求
+
+-   Docker 24.0+
+-   Docker Compose 2.0+
+-   Linux 系統 (推薦 Ubuntu 22.04+)
+
+### 1. 啟動 NetStack
+
+```bash
+# 複製專案
+git clone https://github.com/yourlorg/netstack.git
+cd netstack
+
+# 一鍵啟動核心網
+make up
+
+# 註冊測試用戶 (包含 eMBB, uRLLC 和 mMTC 三種切片類型)
+make register-subscribers
+```
+
+### 2. 測試連線
+
+```bash
+# 執行 E2E 測試
+make test-e2e
+
+# 啟動 RAN 模擬器
+make start-ran
+
+# 測試 UE 連線
+make test-connectivity
+```
+
+### 3. API 介面
+
+NetStack API 可在 http://localhost:8080 取得：
+
+-   **Swagger UI**: http://localhost:8080/docs
+-   **健康檢查**: http://localhost:8080/health
+-   **指標端點**: http://localhost:9090/metrics
+
+## 📋 API 端點
+
+### 🏥 健康檢查
+
+```http
+GET /health
+```
+
+### 👤 UE 管理
+
+```http
+# 取得 UE 資訊
+GET /api/v1/ue/{imsi}
+
+# 取得 UE 統計
+GET /api/v1/ue/{imsi}/stats
+```
+
+### 🔀 Slice 管理
+
+```http
+# 切換 UE Slice
+POST /api/v1/slice/switch
+Content-Type: application/json
+
+{
+  "imsi": "999700000000001",
+  "target_slice": "uRLLC"  // 可選 "eMBB", "uRLLC" 或 "mMTC"
+}
+```
+
+## 📊 測試與驗證
+
+### 效能指標
+
+| 指標     | eMBB   | uRLLC   | mMTC   | 說明             |
+| -------- | ------ | ------- | ------ | ---------------- |
+| RTT      | ~100ms | <50ms   | ~200ms | 往返延遲         |
+| 頻寬     | 高     | 中等    | 低     | 資料傳輸率       |
+| 可靠性   | 99%    | 99.999% | 95%    | 封包成功率       |
+| 連接密度 | 中     | 低      | 超高   | 每平方公里設備數 |
+| 能源效率 | 中     | 高      | 超高   | 設備電池壽命     |
+
+### 測試腳本
+
+```bash
+# 完整 E2E 測試
+./tests/e2e_netstack.sh
+
+# 效能測試
+./tests/performance_test.sh
+
+# Slice 切換測試
+./tests/slice_switching_test.sh
+```
+
+## 🛠️ 開發指南
+
+### 專案結構
+
+```
 netstack/
-├── 📁 compose/ # Docker Compose 配置
-│ ├── core.yaml # 核心網服務 (MongoDB, Open5GS, API, Redis, Prometheus)
-│ └── ran.yaml # RAN 模擬器 (gNB, UE)
-├── 📁 docker/ # 容器化配置
-│ ├── Dockerfile # 多階段建置 (生產/開發環境)
-│ └── healthcheck.sh # 健康檢查腳本
-├── 📁 netstack_api/ # FastAPI 應用程式 (Hexagonal Architecture)
-│ ├── adapters/ # 外部服務適配器
-│ │ ├── mongo_adapter.py # MongoDB 資料庫操作
-│ │ ├── redis_adapter.py # Redis 快取與統計
-│ │ └── open5gs_adapter.py # Open5GS 核心網管理
-│ ├── services/ # 業務邏輯層
-│ │ ├── health_service.py # 健康檢查服務
-│ │ ├── ue_service.py # UE 管理服務
-│ │ └── slice_service.py # Slice 切換服務
-│ ├── models/ # 資料模型
-│ │ ├── requests.py # API 請求模型
-│ │ └── responses.py # API 回應模型
-│ └── main.py # FastAPI 應用程式入口
-├── 📁 config/ # Open5GS 與 UERANSIM 配置
-│ ├── amf.yaml, smf.yaml, nssf.yaml # 核心網服務配置
-│ ├── gnb1.yaml, gnb2.yaml # gNodeB 配置
-│ ├── ue\*.yaml # UE 配置檔案
-│ └── prometheus.yml # 監控配置
-├── 📁 scripts/ # 自動化腳本
-│ ├── register_subscriber.sh # 用戶註冊腳本
-│ └── show_subscribers.sh # 用戶查詢腳本
-├── 📁 tests/ # 測試套件
-│ ├── e2e_netstack.sh # 端到端測試
-│ ├── test_connectivity.sh # 網路連線測試
-│ ├── slice_switching_test.sh # Slice 切換測試
-│ └── performance_test.sh # 效能測試
-├── Makefile # 建置與操作工具 (17 個命令)
-├── README.md # 完整專案文件
-├── requirements.txt # Python 依賴
-└── requirements-dev.txt # 開發依賴
+├── compose/                # Docker Compose 配置
+│   ├── core.yaml          # 核心網服務
+│   ├── ran.yaml           # RAN 模擬器
+│   └── dev.yaml           # 開發環境
+├── docker/                # Dockerfile 與建置腳本
+├── netstack_api/          # FastAPI 源碼
+│   ├── adapters/          # 外部服務適配器
+│   ├── services/          # 業務邏輯層
+│   ├── models/            # 資料模型
+│   └── main.py           # 應用程式入口
+├── config/                # Open5GS 配置檔
+├── scripts/               # 自動化腳本
+├── tests/                 # 測試程式碼
+│   ├── unit/             # 單元測試
+│   ├── integration/      # 整合測試
+│   └── e2e/              # 端到端測試
+└── docs/                 # 文件
+```
 
-🚀 核心功能特色
+### 本地開發
 
-1. 雙 Slice 架構支援
-   eMBB Slice (SST=1, SD=0x111111): 高頻寬行動寬頻
-   uRLLC Slice (SST=2, SD=0x222222): 超可靠低延遲通訊
-   動態 Slice 切換與效能監控
-2. 完整 API 端點
-   GET /health - 系統健康檢查
-   GET /api/v1/ue - 列出所有 UE
-   GET /api/v1/ue/{imsi} - 取得 UE 資訊
-   GET /api/v1/ue/{imsi}/stats - 取得 UE 統計
-   POST /api/v1/slice/switch - Slice 切換
-   GET /api/v1/slice/types - 取得 Slice 類型
-   GET /metrics - Prometheus 指標
+```bash
+# 安裝開發依賴
+pip install -r requirements-dev.txt
 
-3. 一鍵操作工具
-make up              # 🚀 啟動 NetStack
-make register-subscribers  # 👤 註冊測試用戶  
-make start-ran       # 📡 啟動 RAN 模擬器
-make test           # 🧪 執行所有測試
-make slice-switch   # 🔀 測試 Slice 切換
-make status         # 📊 檢查服務狀態
+# 啟動開發環境
+make dev-up
 
-4. 完整測試套件
-E2E 測試: API 功能驗證、Slice 切換測試
-連線測試: UE 網路連通性、DNS 解析、HTTP 連線
-Slice 測試: 單次/連續/並發切換、錯誤處理
-效能測試: API 響應時間、並發負載、系統資源監控
-5. Hexagonal Architecture
-適配器層: MongoDB、Redis、Open5GS 適配器
-服務層: 健康檢查、UE 管理、Slice 管理
-模型層: Pydantic 資料驗證與序列化
-6. 監控與指標
-Prometheus 整合: API 指標、Slice 切換統計、RTT 測量
-健康檢查: 系統級健康狀態監控
-效能監控: 響應時間、錯誤率、成功率追蹤
-📊 測試用戶配置
-系統預設註冊以下測試用戶：
-| IMSI | Slice 類型 | 說明 |
-|------|------------|------|
-| 999700000000001-003 | eMBB | eMBB 專用用戶群組 |
-| 999700000000011-013 | uRLLC | uRLLC 專用用戶群組 |
-| 999700000000099 | 動態切換 | 測試用戶 (支援 Slice 切換) |
+# 執行單元測試
+make test-unit
 
-🛠️ 使用流程
-1. 啟動系統:
-   cd netstack
-   make up                    # 啟動核心網
-   make register-subscribers  # 註冊測試用戶
+# 程式碼檢查
+make lint
+```
 
-2. 測試連線
-   make start-ran            # 啟動 RAN 模擬器
-   make test-connectivity    # 測試 UE 連線
+## 🔧 配置說明
 
-3. API 操作:
-   curl http://localhost:8080/health
-   curl http://localhost:8080/api/v1/ue
-   # Swagger UI: http://localhost:8080/docs
+### Network Slice 配置
 
-4. Slice 切換
-   make slice-switch         # 執行 Slice 切換測試
-   # 或直接 API 呼叫
-   curl -X POST http://localhost:8080/api/v1/slice/switch \
-     -H "Content-Type: application/json" \
-     -d '{"imsi": "999700000000099", "target_slice": "uRLLC"}'
+在 `config/amf.yaml` 中定義的雙 Slice：
 
-5. 監控查看:
-API 文件: http://localhost:8080/docs
-Prometheus: http://localhost:9090
-Open5GS WebUI: http://localhost:9999
+```yaml
+plmn_support:
+    - plmn_id:
+          mcc: 999
+          mnc: 70
+      s_nssai:
+          - sd: 0x111111 # eMBB Slice
+            sst: 1
+          - sd: 0x222222 # uRLLC Slice
+            sst: 2
+          - sd: 0x333333 # mMTC Slice
+            sst: 3
+```
 
-🎯 專案完成度
-✅ 核心功能 (100%): 雙 Slice 支援、API 管理、UE 註冊
-✅ 容器化部署 (100%): Docker Compose 一鍵啟動
-✅ API 介面 (100%): RESTful API + OpenAPI 3.1 文件
-✅ 測試套件 (100%): E2E、連線、Slice、效能測試
-✅ 監控整合 (100%): Prometheus 指標收集
-✅ 操作工具 (100%): Makefile 自動化命令
-✅ 文件撰寫 (100%): 完整 README、API 文件
+### UE 註冊
+
+透過 `scripts/register_subscriber.sh` 註冊用戶：
+
+```bash
+# eMBB 用戶 (IMSI: 999700000000001-003)
+# uRLLC 用戶 (IMSI: 999700000000011-013)
+# mMTC 用戶 (IMSI: 999700000000021-023)
+# 衛星-無人機用戶 (IMSI: 999700000000050-052)
+```
+
+## 📈 監控與指標
+
+### Prometheus 指標
+
+-   `netstack_slice_rtt_seconds` - Slice RTT 延遲
+-   `netstack_ue_attach_total` - UE 連接統計
+-   `netstack_slice_switch_total` - Slice 切換次數
+
+### 查看即時指標
+
+```bash
+# Prometheus Web UI
+open http://localhost:9090
+
+# 查看 API 指標
+curl http://localhost:8080/metrics
+```
+
+## 🚢 部署與整合
+
+### 與 SimWorld 整合
+
+```bash
+# 拉取 NetStack 映像
+docker pull ghcr.io/yourorg/netstack:latest
+
+# 在 SimWorld compose 中引用
+services:
+  netstack-api:
+    image: ghcr.io/yourorg/netstack:latest
+    environment:
+      - DATABASE_URL=mongodb://mongo:27017/open5gs
+    ports:
+      - "8080:8080"
+```
+
+### 生產環境部署
+
+```bash
+# 使用 Helm Chart (Kubernetes)
+helm install netstack ./charts/netstack
+
+# 或使用 Docker Swarm
+docker stack deploy -c compose/production.yaml netstack
+```
+
+## 🔍 疑難排解
+
+### 常見問題
+
+1. **UE 無法連接**
+
+    ```bash
+    # 檢查核心網狀態
+    make status
+
+    # 查看日誌
+    docker compose logs amf
+    ```
+
+2. **Slice 切換失敗**
+
+    ```bash
+    # 檢查 NSSF 配置
+    docker compose logs nssf
+
+    # 驗證用戶配置
+    make show-subscribers
+    ```
+
+3. **API 無回應**
+
+    ```bash
+    # 重啟 API 服務
+    docker compose restart netstack-api
+
+    # 檢查健康狀態
+    curl http://localhost:8080/health
+    ```
+
+## 📚 文件與資源
+
+-   [架構設計文件](docs/architecture.md)
+-   [API 規格文件](docs/api.md)
+-   [測試結果解讀指南](docs/how_to_read_tests.md)
+-   [貢獻指南](CONTRIBUTING.md)
+
+## 🤝 貢獻
+
+歡迎提交 Issue 和 Pull Request！請閱讀 [貢獻指南](CONTRIBUTING.md) 了解詳細資訊。
+
+## 📄 授權
+
+本專案採用 [Apache License 2.0](LICENSE) 授權。
+
+## 📞 聯絡方式
+
+-   **技術支援**: netstack-support@yourorg.com
+-   **Issue 回報**: https://github.com/yourorg/netstack/issues
+-   **討論區**: https://github.com/yourorg/netstack/discussions
+
+---
+
+🌟 **NetStack v1.0** - 讓 5G 核心網部署變得簡單！

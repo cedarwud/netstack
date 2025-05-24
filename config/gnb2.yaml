@@ -1,33 +1,42 @@
-version: '3'
-services: 
-  gnb2:
-    image: gradiant/ueransim:3.2.7
-    container_name: gnb2
-    command: 
-      - gnb
-    environment:
-      AMF_HOSTNAME: amf
-      GNB_HOSTNAME: gnb2
-      TAC: '1'
-      MCC: '999'
-      MNC: '70'
-      SST: '2'
-      SD: '0x222222'
+mcc: '999'
+mnc: '70'
+nci: 0x000000020
+idLength: 22
+tac: 1
+linkIp: 172.20.1.20
+ngapIp: 172.20.1.20
+gtpIp: 172.20.1.20
 
-  ues2:
-    image: gradiant/ueransim:3.2.7
-    command: ['ue','-n','3']
-    cap_add:
-      - all
-    privileged: true
-    environment:
-      GNB_HOSTNAME: gnb2
-      APN: internet
-      MSISDN: '0000000011'
-      MCC: '999'
-      MNC: '70'
-      KEY: '465B5CE8B199B49FAA5F0A2EE238A6BC'
-      OP_TYPE: OPC
-      OP: 'E8ED289DEBA952E4283B54E88E6183CA'
-      SST: '2'
-      SD: '0x222222'
+# AMF 配置
+amfConfigs:
+  - address: 172.20.0.20
+    port: 38412
+
+# 支援的 PLMN 列表
+plmns:
+  - mcc: '999'
+    mnc: '70'
+    tac: 1
+    nssai:
+      - sst: 2
+        sd: 0x222222
+
+# 支援的 S-NSSAI 列表
+nssai:
+  - sst: 1
+    sd: 0x111111
+  - sst: 2  
+    sd: 0x222222
+  - sst: 3
+    sd: 0x333333
+
+# gNB 名稱，這個值在 5GC 中應該是唯一的
+name: 'UERANSIM-gnb-002-01-1'
+
+# 日誌級別
+logging:
+  level: info
+
+# NIA 和 NEA 算法
+niaAlg: [IA1, IA2, IA3]
+neaAlg: [EA0, EA1, EA2, EA3] 

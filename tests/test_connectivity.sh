@@ -3,7 +3,11 @@
 # NetStack 網路連線測試腳本
 # 測試 UE 的網路連通性，包括 ping、traceroute 和頻寬測試
 
-set -e
+# 移除 set -e 以避免腳本在非關鍵錯誤時退出
+# set -e
+
+# 信號處理 - 確保腳本不會被意外中斷
+trap 'echo "測試被中斷"; exit 1' INT TERM
 
 # 顏色定義
 RED='\033[0;31m'
@@ -54,8 +58,14 @@ get_ue_interface() {
         echo "$interface"
         return 0
     else
-        echo "uesimtun0"  # 預設介面名稱
-        return 1
+        # 檢查是否有 uesimtun 接口存在
+        if docker exec "$container_name" ip addr show | grep -q uesimtun; then
+            echo "uesimtun0"  # 預設介面名稱
+            return 0
+        else
+            echo ""  # 沒有 uesimtun 接口
+            return 1
+        fi
     fi
 }
 
@@ -148,16 +158,22 @@ test_bandwidth() {
     
     log_test "從 $container_name 測試下載速度"
     
-    # 下載小檔案測試速度
-    test_url="http://speedtest.wdc01.softlayer.com/downloads/test10.zip"
+    # 嘗試多個測試 URL
+    test_urls=(
+        "http://httpbin.org/bytes/1048576"  # 1MB 資料
+        "http://www.google.com/robots.txt"  # 備用小檔案
+        "http://github.com/robots.txt"      # 另一個備用
+    )
     
-    if docker exec "$container_name" timeout 15 curl -s -w "速度: %{speed_download} bytes/sec\n時間: %{time_total}s\n" -o /dev/null "$test_url" 2>/dev/null; then
-        log_info "✅ 頻寬測試完成"
-        return 0
-    else
-        log_warning "⚠️  頻寬測試失敗或超時"
-        return 1
-    fi
+    for test_url in "${test_urls[@]}"; do
+        if docker exec "$container_name" timeout 10 curl -s -w "速度: %{speed_download} bytes/sec\n時間: %{time_total}s\n" -o /dev/null "$test_url" 2>/dev/null; then
+            log_info "✅ 頻寬測試完成"
+            return 0
+        fi
+    done
+    
+    log_warning "⚠️  頻寬測試失敗或超時 (非關鍵錯誤)"
+    return 1
 }
 
 # 測試特定容器的所有連線
@@ -175,6 +191,11 @@ test_container_connectivity() {
     
     # 取得網路介面
     interface=$(get_ue_interface "$container_name")
+    if [ -z "$interface" ]; then
+        log_error "容器 $container_name 沒有 uesimtun 網路接口 - UE 可能未成功連接到網路"
+        log_warning "跳過此容器的網路測試"
+        return 1
+    fi
     log_info "使用網路介面: $interface"
     
     local passed=0
@@ -233,7 +254,12 @@ test_container_connectivity() {
     echo -e "失敗: ${RED}$failed${NC}"
     echo ""
     
-    return $failed
+    # 返回 0 (成功) 如果沒有失敗，返回 1 (失敗) 如果有失敗
+    if [ $failed -eq 0 ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # 主要測試流程
@@ -241,32 +267,78 @@ main() {
     echo "=================================================="
     echo "🌐 NetStack 網路連線測試開始"
     echo "=================================================="
+    echo "預計測試 ${#UE_CONTAINERS[@]} 個容器: ${UE_CONTAINERS[*]}"
+    echo ""
     
-    local total_passed=0
-    local total_failed=0
-    
-    # 測試每個 UE 容器
+    # 檢查是否有任何 UE 容器運行
+    running_containers=0
     for container in "${UE_CONTAINERS[@]}"; do
-        if test_container_connectivity "$container"; then
-            ((total_passed++))
-        else
-            ((total_failed++))
+        if check_container_running "$container"; then
+            ((running_containers++))
         fi
     done
     
-    # 總結果
+    if [ $running_containers -eq 0 ]; then
+        log_error "❌ 沒有任何 UE 容器在運行"
+        log_warning "連線測試需要 UE 模擬器容器運行"
+        log_warning "請先啟動 UE 模擬器："
+        log_warning "  make start-ran"
+        log_warning "或檢查 UE 容器配置是否正確"
+        echo ""
+        echo "=================================================="
+        echo "📊 網路連線測試總結"
+        echo "=================================================="
+        echo "容器測試通過: 0"
+        echo "容器測試失敗: ${#UE_CONTAINERS[@]}"
+        echo "總計容器: ${#UE_CONTAINERS[@]}"
+        echo ""
+        echo "❌ 所有容器連線測試失敗 (容器未運行)"
+        exit 1
+    fi
+    
+    # 測試計數器
+    local passed=0
+    local failed=0
+    
+    # 測試每個容器
+    for i in "${!UE_CONTAINERS[@]}"; do
+        container="${UE_CONTAINERS[$i]}"
+        container_num=$((i + 1))
+        total_containers=${#UE_CONTAINERS[@]}
+        
+        echo "正在測試第 $container_num/$total_containers 個容器: $container"
+        
+        if test_container_connectivity "$container"; then
+            log_info "✅ 容器 $container 測試通過"
+            ((passed++))
+        else
+            log_error "❌ 容器 $container 測試失敗"
+            ((failed++))
+        fi
+        
+        echo ""
+    done
+    
+    # 測試結果
     echo "=================================================="
     echo "📊 網路連線測試總結"
     echo "=================================================="
-    echo -e "容器測試通過: ${GREEN}$total_passed${NC}"
-    echo -e "容器測試失敗: ${RED}$total_failed${NC}"
-    echo -e "總計容器: $((total_passed + total_failed))"
+    echo "容器測試通過: $passed"
+    echo "容器測試失敗: $failed"
+    echo "總計容器: $((passed + failed))"
+    echo ""
     
-    if [ $total_failed -eq 0 ]; then
-        echo -e "\n🎉 ${GREEN}所有網路連線測試通過！${NC}"
+    if [ $failed -eq 0 ]; then
+        echo "🎉 所有容器連線測試通過"
         exit 0
     else
-        echo -e "\n❌ ${RED}有 $total_failed 個容器連線測試失敗${NC}"
+        echo "❌ 有 $failed 個容器連線測試失敗"
+        if [ $failed -eq ${#UE_CONTAINERS[@]} ]; then
+            log_warning "所有容器都失敗，可能是因為："
+            log_warning "1. UE 模擬器未啟動 (make start-ran)"
+            log_warning "2. UE 未成功連接到網路"
+            log_warning "3. 網路配置問題"
+        fi
         exit 1
     fi
 }

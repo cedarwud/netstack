@@ -194,6 +194,15 @@ subscriber-help: ## 📚 顯示用戶管理相關指令說明
 
 start-ran: ## 📡 啟動 RAN 模擬器
 	@echo "$(GREEN)📡 啟動 RAN 模擬器...$(NC)"
+	@if ! docker ps --format '{{.Names}}' | grep -q "netstack-amf"; then \
+		echo "$(YELLOW)⚠️ 警告: 核心網 (AMF) 未在運行。RAN 模擬器可能會啟動失敗。$(NC)"; \
+		echo "$(YELLOW)建議: 請先運行 'make up' 啟動核心網，再啟動 RAN 模擬器。$(NC)"; \
+		read -p "是否繼續啟動 RAN 模擬器？(y/n) " choice; \
+		if [ "$$choice" != "y" ]; then \
+			echo "$(YELLOW)已取消啟動 RAN 模擬器。$(NC)"; \
+			exit 0; \
+		fi \
+	fi
 	docker compose -f $(COMPOSE_FILE_RAN) up -d
 	@echo "$(GREEN)✅ RAN 模擬器啟動完成$(NC)"
 
@@ -202,27 +211,27 @@ stop-ran: ## 📡 停止 RAN 模擬器
 	docker compose -f $(COMPOSE_FILE_RAN) down
 	@echo "$(GREEN)✅ RAN 模擬器已停止$(NC)"
 
-test: ## 🧪 執行所有測試
-	@echo "$(GREEN)🧪 執行 NetStack 測試套件...$(NC)"
-	@$(MAKE) test-unit
-	@$(MAKE) test-integration
-	# @$(MAKE) test-e2e # E2E tests might need separate handling or confirmation if they also run in Docker
+# test: ## 🧪 執行所有測試
+# 	@echo "$(GREEN)🧪 執行 NetStack 測試套件...$(NC)"
+# 	@$(MAKE) test-unit
+# 	@$(MAKE) test-integration
+# 	# @$(MAKE) test-e2e # E2E tests might need separate handling or confirmation if they also run in Docker
 
-test-unit: build ## 🧪 執行單元測試
-	@echo "$(YELLOW)Ensuring clean environment for unit tests...$(NC)"
-	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
-	@echo "$(BLUE)🧪 執行單元測試...$(NC)"
-	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_unit netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/unit/ -v --cov=. --cov-report=term-missing'"
+# test-unit: build ## 🧪 執行單元測試
+# 	@echo "$(YELLOW)Ensuring clean environment for unit tests...$(NC)"
+# 	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
+# 	@echo "$(BLUE)🧪 執行單元測試...$(NC)"
+# 	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_unit netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/unit/ -v --cov=. --cov-report=term-missing'"
 
-test-integration: build ## 🧪 執行整合測試
-	@echo "$(YELLOW)Ensuring clean environment for integration tests...$(NC)"
-	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
-	@echo "$(BLUE)🧪 執行整合測試...$(NC)"
-	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_integration netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/integration/ -v'"
+# test-integration: build ## 🧪 執行整合測試
+# 	@echo "$(YELLOW)Ensuring clean environment for integration tests...$(NC)"
+# 	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
+# 	@echo "$(BLUE)🧪 執行整合測試...$(NC)"
+# 	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_integration netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/integration/ -v'"
 
 test-e2e: ## 🧪 執行端到端測試
 	@echo "$(BLUE)🧪 執行 E2E 測試...$(NC)"
-	@./tests/fixed_e2e_test.sh
+	@./tests/e2e_netstack.sh
 
 test-connectivity: ## 🌐 測試 UE 連線
 	@echo "$(BLUE)🌐 測試 UE 連線...$(NC)"

@@ -6,15 +6,18 @@ NetStack API - Open5GS + UERANSIM 雙 Slice 管理 API
 """
 
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Dict, List
 
 import structlog
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from prometheus_client import Counter, Histogram, generate_latest, CollectorRegistry
 from prometheus_client.exposition import generate_latest
 from fastapi import Response
@@ -33,6 +36,28 @@ from .models.responses import (
     SliceSwitchResponse,
     ErrorResponse,
 )
+
+
+# 自定義 JSON 編碼器
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+
+# 自定義 JSONResponse 類
+class CustomJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+            cls=CustomJSONEncoder,
+        ).encode("utf-8")
+
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -98,7 +123,7 @@ async def lifespan(app: FastAPI):
 
     # 初始化服務
     ue_service = UEService(mongo_adapter, redis_adapter)
-    slice_service = SliceService(mongo_adapter, open5gs_adapter)
+    slice_service = SliceService(mongo_adapter, open5gs_adapter, redis_adapter)
     health_service = HealthService(mongo_adapter, redis_adapter)
 
     # 儲存到應用程式狀態
@@ -207,7 +232,7 @@ async def get_metrics():
 # ===== UE 管理端點 =====
 
 
-@app.get("/api/v1/ue/{imsi}", response_model=UEInfoResponse, tags=["UE 管理"])
+@app.get("/api/v1/ue/{imsi}", tags=["UE 管理"])
 async def get_ue_info(imsi: str):
     """
     取得指定 IMSI 的 UE 資訊
@@ -228,7 +253,7 @@ async def get_ue_info(imsi: str):
                 detail=f"找不到 IMSI {imsi} 的 UE",
             )
 
-        return UEInfoResponse(**ue_info)
+        return CustomJSONResponse(content=ue_info)
 
     except HTTPException:
         raise
@@ -273,7 +298,7 @@ async def get_ue_stats(imsi: str):
         )
 
 
-@app.get("/api/v1/ue", response_model=List[UEInfoResponse], tags=["UE 管理"])
+@app.get("/api/v1/ue", tags=["UE 管理"])
 async def list_ues():
     """
     列出所有已註冊的 UE
@@ -285,7 +310,7 @@ async def list_ues():
         ue_service = app.state.ue_service
         ues = await ue_service.list_all_ues()
 
-        return [UEInfoResponse(**ue) for ue in ues]
+        return CustomJSONResponse(content=ues)
 
     except Exception as e:
         logger.error("列出 UE 失敗", error=str(e))
@@ -353,25 +378,39 @@ async def switch_slice(request: SliceSwitchRequest):
         # 構建回應
         from .models.responses import SliceInfo
 
+        previous_slice = result.get("previous_slice") or "unknown"
+        current_slice = result.get("current_slice") or "unknown"
+
         previous_slice_info = SliceInfo(
-            sst=1 if result.get("previous_slice") == "eMBB" else 2,
-            sd="0x111111" if result.get("previous_slice") == "eMBB" else "0x222222",
-            slice_type=result.get("previous_slice", "unknown"),
+            sst=1 if previous_slice == "eMBB" else 2,
+            sd="0x111111" if previous_slice == "eMBB" else "0x222222",
+            slice_type=previous_slice,
         )
 
         new_slice_info = SliceInfo(
-            sst=1 if result.get("current_slice") == "eMBB" else 2,
-            sd="0x111111" if result.get("current_slice") == "eMBB" else "0x222222",
-            slice_type=result.get("current_slice"),
+            sst=1 if current_slice == "eMBB" else 2,
+            sd="0x111111" if current_slice == "eMBB" else "0x222222",
+            slice_type=current_slice,
         )
 
-        return SliceSwitchResponse(
-            imsi=request.imsi,
-            previous_slice=previous_slice_info,
-            new_slice=new_slice_info,
-            success=True,
-            message=result.get("message", "Slice 切換成功"),
-        )
+        response_data = {
+            "imsi": request.imsi,
+            "previous_slice": {
+                "sst": previous_slice_info.sst,
+                "sd": previous_slice_info.sd,
+                "slice_type": previous_slice_info.slice_type,
+            },
+            "new_slice": {
+                "sst": new_slice_info.sst,
+                "sd": new_slice_info.sd,
+                "slice_type": new_slice_info.slice_type,
+            },
+            "switch_time": datetime.now().isoformat(),
+            "success": True,
+            "message": result.get("message", "Slice 切換成功"),
+        }
+
+        return CustomJSONResponse(content=response_data)
 
     except HTTPException:
         # 更新失敗指標
@@ -426,11 +465,15 @@ async def get_slice_types():
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """HTTP 異常處理器"""
-    return JSONResponse(
+    error_data = {
+        "error": "HTTP Error",
+        "message": exc.detail,
+        "status_code": exc.status_code,
+        "timestamp": datetime.now().isoformat(),
+    }
+    return CustomJSONResponse(
         status_code=exc.status_code,
-        content=ErrorResponse(
-            error="HTTP Error", message=exc.detail, status_code=exc.status_code
-        ).dict(),
+        content=error_data,
     )
 
 
@@ -438,11 +481,15 @@ async def http_exception_handler(request, exc):
 async def general_exception_handler(request, exc):
     """一般異常處理器"""
     logger.error("未處理的異常", error=str(exc), path=request.url.path)
-    return JSONResponse(
+    error_data = {
+        "error": "Internal Server Error",
+        "message": "系統內部錯誤",
+        "status_code": 500,
+        "timestamp": datetime.now().isoformat(),
+    }
+    return CustomJSONResponse(
         status_code=500,
-        content=ErrorResponse(
-            error="Internal Server Error", message="系統內部錯誤", status_code=500
-        ).dict(),
+        content=error_data,
     )
 
 

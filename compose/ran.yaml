@@ -1,5 +1,5 @@
 networks:
-  netstack-core:
+  compose_netstack-core:
     external: true
 
 services:
@@ -7,16 +7,23 @@ services:
   gnb1:
     image: gradiant/ueransim:3.2.6
     container_name: netstack-gnb1
-    volumes:
-      - ../config/gnb1.yaml:/opt/ueransim/config/gnb.yaml
-    command: nr-gnb -c /opt/ueransim/config/gnb.yaml
+    command: ["gnb"]
+    environment:
+      MCC: '999'
+      MNC: '70'
+      TAC: '1'
+      SST: '1'
+      SD: '0x111111'
+      N2_BIND_IP: 172.20.1.10
+      N3_BIND_IP: 172.20.1.10
+      N3_ADVERTISE_IP: 172.20.1.10
+      RADIO_BIND_IP: 172.20.1.10
+      AMF_IP: 172.20.0.20
     cap_add:
       - all
     privileged: true
-    depends_on:
-      - amf
     networks:
-      netstack-core:
+      compose_netstack-core:
         ipv4_address: 172.20.1.10
     restart: unless-stopped
     healthcheck:
@@ -29,16 +36,23 @@ services:
   gnb2:
     image: gradiant/ueransim:3.2.6
     container_name: netstack-gnb2
-    volumes:
-      - ../config/gnb2.yaml:/opt/ueransim/config/gnb.yaml
-    command: nr-gnb -c /opt/ueransim/config/gnb.yaml
+    command: ["gnb"]
+    environment:
+      MCC: '999'
+      MNC: '70'
+      TAC: '1'
+      SST: '2'
+      SD: '0x222222'
+      N2_BIND_IP: 172.20.1.20
+      N3_BIND_IP: 172.20.1.20
+      N3_ADVERTISE_IP: 172.20.1.20
+      RADIO_BIND_IP: 172.20.1.20
+      AMF_IP: 172.20.0.20
     cap_add:
       - all
     privileged: true
-    depends_on:
-      - amf
     networks:
-      netstack-core:
+      compose_netstack-core:
         ipv4_address: 172.20.1.20
     restart: unless-stopped
     healthcheck:
@@ -47,102 +61,114 @@ services:
       timeout: 5s
       retries: 3
 
-  # UE 群組 1 - eMBB Slice 用戶
+  # UE 群組 1 - eMBB Slice 用戶 (IMSI: 999700000000001)
   ues1:
     image: gradiant/ueransim:3.2.6
     container_name: netstack-ues1
-    volumes:
-      - ../config/ue1.yaml:/opt/ueransim/config/ue1.yaml
-      - ../config/ue2.yaml:/opt/ueransim/config/ue2.yaml
-      - ../config/ue3.yaml:/opt/ueransim/config/ue3.yaml
-    command: |
-      sh -c "
-        nr-ue -c /opt/ueransim/config/ue1.yaml &
-        nr-ue -c /opt/ueransim/config/ue2.yaml &
-        nr-ue -c /opt/ueransim/config/ue3.yaml &
-        wait
-      "
+    command: ["ue", "-n", "1"]
+    environment:
+      GNB_IP: 172.20.1.10
+      MCC: '999'
+      MNC: '70'
+      MSISDN: '0000000001'
+      KEY: '465B5CE8B199B49FAA5F0A2EE238A6BC'
+      OP_TYPE: 'OPC'
+      OP: 'E8ED289DEBA952E4283B54E88E6183CA'
+      APN: 'internet'
+      SST: '1'
+      SD: '0x111111'
     cap_add:
       - all
     privileged: true
     depends_on:
       - gnb1
     networks:
-      netstack-core:
+      compose_netstack-core:
         ipv4_address: 172.20.1.30
     restart: unless-stopped
     stdin_open: true
     tty: true
 
-  # UE 群組 2 - uRLLC Slice 用戶
+  # UE 群組 2 - uRLLC Slice 用戶 (IMSI: 999700000000002)
   ues2:
     image: gradiant/ueransim:3.2.6
     container_name: netstack-ues2
-    volumes:
-      - ../config/ue11.yaml:/opt/ueransim/config/ue11.yaml
-      - ../config/ue12.yaml:/opt/ueransim/config/ue12.yaml
-      - ../config/ue13.yaml:/opt/ueransim/config/ue13.yaml
-    command: |
-      sh -c "
-        nr-ue -c /opt/ueransim/config/ue11.yaml &
-        nr-ue -c /opt/ueransim/config/ue12.yaml &
-        nr-ue -c /opt/ueransim/config/ue13.yaml &
-        wait
-      "
+    command: ["ue", "-n", "1"]
+    environment:
+      GNB_IP: 172.20.1.10
+      MCC: '999'
+      MNC: '70'
+      MSISDN: '0000000002'
+      KEY: '465B5CE8B199B49FAA5F0A2EE238A6BC'
+      OP_TYPE: 'OPC'
+      OP: 'E8ED289DEBA952E4283B54E88E6183CA'
+      APN: 'internet'
+      SST: '1'
+      SD: '0x111111'
     cap_add:
       - all
     privileged: true
     depends_on:
-      - gnb2
+      - gnb1
     networks:
-      netstack-core:
-        ipv4_address: 172.20.1.40
+      compose_netstack-core:
+        ipv4_address: 172.20.1.31
     restart: unless-stopped
     stdin_open: true
     tty: true
 
-  # UE 群組 3 - mMTC Slice 用戶
+  # UE 群組 3 - mMTC Slice 用戶 (IMSI: 999700000000003)
   ues3:
     image: gradiant/ueransim:3.2.6
     container_name: netstack-ues3
-    volumes:
-      - ../config/ue21.yaml:/opt/ueransim/config/ue21.yaml
-      - ../config/ue22.yaml:/opt/ueransim/config/ue22.yaml
-    command: |
-      sh -c "
-        nr-ue -c /opt/ueransim/config/ue21.yaml &
-        nr-ue -c /opt/ueransim/config/ue22.yaml &
-        wait
-      "
+    command: ["ue", "-n", "1"]
+    environment:
+      GNB_IP: 172.20.1.10
+      MCC: '999'
+      MNC: '70'
+      MSISDN: '0000000003'
+      KEY: '465B5CE8B199B49FAA5F0A2EE238A6BC'
+      OP_TYPE: 'OPC'
+      OP: 'E8ED289DEBA952E4283B54E88E6183CA'
+      APN: 'internet'
+      SST: '1'
+      SD: '0x111111'
     cap_add:
       - all
     privileged: true
     depends_on:
       - gnb1
-      - gnb2
     networks:
-      netstack-core:
-        ipv4_address: 172.20.1.45
+      compose_netstack-core:
+        ipv4_address: 172.20.1.32
     restart: unless-stopped
     stdin_open: true
     tty: true
 
-  # 測試用 UE (可動態切換 Slice)
+  # 測試用 UE (IMSI: 999700000000099)
   ue-test:
     image: gradiant/ueransim:3.2.6
     container_name: netstack-ue-test
-    volumes:
-      - ../config/ue-test.yaml:/opt/ueransim/config/ue.yaml
-    command: nr-ue -c /opt/ueransim/config/ue.yaml
+    command: ["ue", "-n", "1"]
+    environment:
+      GNB_IP: 172.20.1.10
+      MCC: '999'
+      MNC: '70'
+      MSISDN: '0000000099'
+      KEY: '465B5CE8B199B49FAA5F0A2EE238A6BC'
+      OP_TYPE: 'OPC'
+      OP: 'E8ED289DEBA952E4283B54E88E6183CA'
+      APN: 'internet'
+      SST: '1'
+      SD: '0x111111'
     cap_add:
       - all
     privileged: true
     depends_on:
       - gnb1
-      - gnb2
     networks:
-      netstack-core:
-        ipv4_address: 172.20.1.50
+      compose_netstack-core:
+        ipv4_address: 172.20.1.33
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -159,7 +185,7 @@ services:
     cap_add:
       - NET_ADMIN
     networks:
-      netstack-core:
+      compose_netstack-core:
         ipv4_address: 172.20.1.100
     restart: unless-stopped
     stdin_open: true

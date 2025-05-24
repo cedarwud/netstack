@@ -3,7 +3,8 @@
 # NetStack Slice 切換測試腳本
 # 測試 eMBB 和 uRLLC 切片之間的動態切換功能
 
-set -e
+# 注意：移除 set -e，改為各部分獨立處理錯誤
+# set -e
 
 # 顏色定義
 RED='\033[0;31m'
@@ -31,6 +32,31 @@ log_error() {
 
 log_test() {
     echo -e "${BLUE}[TEST]${NC} $1"
+}
+
+# 檢查測試用戶是否存在
+check_test_user_exists() {
+    log_info "檢查測試 UE ($TEST_IMSI) 是否存在..."
+    
+    response=$(curl -s -w "%{http_code}" "$API_BASE_URL/api/v1/ue/$TEST_IMSI" 2>/dev/null || echo "000")
+    http_code="${response: -3}"
+    
+    if [ "$http_code" == "200" ]; then
+        body="${response%???}"
+        current_slice=$(echo "$body" | jq -r '.slice.slice_type' 2>/dev/null || echo "unknown")
+        log_info "當前 Slice: $current_slice"
+        return 0
+    elif [ "$http_code" == "404" ]; then
+        log_error "❌ 測試 UE $TEST_IMSI 不存在"
+        log_warning "請先執行以下命令註冊測試用戶："
+        log_warning "  make register-subscribers"
+        log_warning "或手動添加測試用戶："
+        log_warning "  make add-subscriber IMSI=$TEST_IMSI KEY=465B5CE8B199B49FAA5F0A2EE238A6BC OPC=E8ED289DEBA952E4283B54E88E6183CA"
+        return 1
+    else
+        log_error "❌ 檢查測試 UE 時發生錯誤，HTTP 狀態碼: $http_code"
+        return 1
+    fi
 }
 
 # 取得當前 Slice 類型
@@ -107,6 +133,31 @@ test_single_slice_switch() {
     fi
 }
 
+# 測試單次 Slice 切換 (靜默版本，只返回時間)
+test_single_slice_switch_silent() {
+    local target_slice=$1
+    
+    start_time=$(date +%s%3N)
+    result=$(perform_slice_switch "$TEST_IMSI" "$target_slice")
+    end_time=$(date +%s%3N)
+    
+    http_code=$(echo "$result" | cut -d'|' -f1)
+    switch_time=$((end_time - start_time))
+    
+    if [ "$http_code" == "200" ]; then
+        # 驗證切換結果
+        new_slice=$(get_current_slice "$TEST_IMSI")
+        if [ "$new_slice" == "$target_slice" ]; then
+            echo "$switch_time"
+            return 0
+        else
+            return 1
+        fi
+    else
+        return 1
+    fi
+}
+
 # 測試連續 Slice 切換
 test_continuous_slice_switching() {
     local rounds=$1
@@ -127,10 +178,13 @@ test_continuous_slice_switching() {
         
         log_info "第 $i 輪: 切換到 $target_slice"
         
-        if switch_time=$(test_single_slice_switch "$target_slice"); then
+        if switch_time=$(test_single_slice_switch_silent "$target_slice" 2>/dev/null); then
             ((success_count++))
             switch_times+=("$switch_time")
             total_time=$((total_time + switch_time))
+            log_info "✅ 切換成功 (${switch_time}ms)"
+        else
+            log_error "❌ 切換失敗"
         fi
         
         # 間隔時間
@@ -252,11 +306,11 @@ test_error_handling() {
     result=$(perform_slice_switch "invalid_imsi" "eMBB")
     http_code=$(echo "$result" | cut -d'|' -f1)
     
-    if [ "$http_code" == "400" ] || [ "$http_code" == "404" ]; then
-        log_info "✅ 無效 IMSI 錯誤處理正確"
+    if [ "$http_code" == "422" ] || [ "$http_code" == "400" ] || [ "$http_code" == "404" ]; then
+        log_info "✅ 無效 IMSI 錯誤處理正確 (HTTP $http_code)"
         ((passed++))
     else
-        log_error "❌ 無效 IMSI 錯誤處理失敗"
+        log_error "❌ 無效 IMSI 錯誤處理失敗 (HTTP $http_code)"
         ((failed++))
     fi
     
@@ -265,11 +319,11 @@ test_error_handling() {
     result=$(perform_slice_switch "$TEST_IMSI" "InvalidSlice")
     http_code=$(echo "$result" | cut -d'|' -f1)
     
-    if [ "$http_code" == "400" ]; then
-        log_info "✅ 無效 Slice 類型錯誤處理正確"
+    if [ "$http_code" == "422" ] || [ "$http_code" == "400" ]; then
+        log_info "✅ 無效 Slice 類型錯誤處理正確 (HTTP $http_code)"
         ((passed++))
     else
-        log_error "❌ 無效 Slice 類型錯誤處理失敗"
+        log_error "❌ 無效 Slice 類型錯誤處理失敗 (HTTP $http_code)"
         ((failed++))
     fi
     
@@ -292,7 +346,7 @@ test_slice_performance() {
     # 測試 eMBB 切換效能
     log_info "測試 eMBB 切換效能"
     for ((i=1; i<=3; i++)); do
-        if switch_time=$(test_single_slice_switch "eMBB"); then
+        if switch_time=$(test_single_slice_switch_silent "eMBB" 2>/dev/null); then
             embb_times+=("$switch_time")
         fi
         sleep 1
@@ -301,7 +355,7 @@ test_slice_performance() {
     # 測試 uRLLC 切換效能
     log_info "測試 uRLLC 切換效能"
     for ((i=1; i<=3; i++)); do
-        if switch_time=$(test_single_slice_switch "uRLLC"); then
+        if switch_time=$(test_single_slice_switch_silent "uRLLC" 2>/dev/null); then
             urllc_times+=("$switch_time")
         fi
         sleep 1
@@ -345,17 +399,10 @@ main() {
     echo "🔀 NetStack Slice 切換測試開始"
     echo "=================================================="
     
-    # 檢查測試 UE 是否存在
-    log_info "檢查測試 UE ($TEST_IMSI) 是否存在..."
-    current_slice=$(get_current_slice "$TEST_IMSI")
-    
-    if [ "$current_slice" == "unknown" ]; then
-        log_error "測試 UE $TEST_IMSI 不存在，請先註冊用戶"
+    # 檢查測試用戶是否存在
+    if ! check_test_user_exists; then
         exit 1
     fi
-    
-    log_info "當前 Slice: $current_slice"
-    echo ""
     
     # 測試計數器
     local passed=0

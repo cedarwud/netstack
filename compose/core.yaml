@@ -1,0 +1,270 @@
+networks:
+  netstack-core:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+services:
+  # MongoDB 資料庫
+  mongo:
+    image: mongo:6.0
+    container_name: netstack-mongo
+    environment:
+      MONGO_INITDB_DATABASE: open5gs
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.10
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Open5GS 核心網服務
+  amf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-amf
+    volumes:
+      - ../config/amf.yaml:/opt/open5gs/etc/open5gs/amf.yaml
+    command: open5gs-amfd
+    depends_on:
+      - mongo
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.20
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7777"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ausf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-ausf
+    command: open5gs-ausfd
+    depends_on:
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.21
+    restart: unless-stopped
+
+  bsf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-bsf
+    command: open5gs-bsfd
+    depends_on:
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.22
+    restart: unless-stopped
+
+  nrf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-nrf
+    command: open5gs-nrfd
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.23
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7777"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  nssf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-nssf
+    volumes:
+      - ../config/nssf.yaml:/opt/open5gs/etc/open5gs/nssf.yaml
+    command: open5gs-nssfd
+    depends_on:
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.24
+    restart: unless-stopped
+
+  pcf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-pcf
+    command: open5gs-pcfd
+    environment:
+      DB_URI: mongodb://mongo/open5gs
+    depends_on:
+      - mongo
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.25
+    restart: unless-stopped
+
+  scp:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-scp
+    command: open5gs-scpd
+    environment:
+      DB_URI: mongodb://mongo/open5gs
+    depends_on:
+      - mongo
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.26
+    restart: unless-stopped
+
+  smf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-smf
+    volumes:
+      - ../config/smf.yaml:/opt/open5gs/etc/open5gs/smf.yaml
+    command: open5gs-smfd
+    depends_on:
+      - nrf
+      - upf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.27
+    restart: unless-stopped
+
+  udm:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-udm
+    command: open5gs-udmd
+    depends_on:
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.28
+    restart: unless-stopped
+
+  udr:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-udr
+    command: open5gs-udrd
+    environment:
+      DB_URI: mongodb://mongo/open5gs
+    depends_on:
+      - mongo
+      - nrf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.29
+    restart: unless-stopped
+
+  upf:
+    image: gradiant/open5gs:2.7.5
+    container_name: netstack-upf
+    user: root
+    command: open5gs-upfd
+    cap_add:
+      - all
+    privileged: true
+    ports:
+      - "2152:2152/udp"
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.30
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "open5gs-upfd"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Open5GS WebUI
+  webui:
+    image: gradiant/open5gs-webui:2.7.5
+    container_name: netstack-webui
+    environment:
+      DB_URI: mongodb://mongo/open5gs
+      NODE_ENV: production
+    ports:
+      - "9999:9999"
+    depends_on:
+      - mongo
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.31
+    restart: unless-stopped
+
+  # NetStack API 服務
+  netstack-api:
+    image: netstack-api:latest
+    container_name: netstack-api
+    environment:
+      - DATABASE_URL=mongodb://mongo:27017/open5gs
+      - MONGO_HOST=mongo
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - ENVIRONMENT=production
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo
+      - redis
+      - amf
+      - smf
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.40
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 快取
+  redis:
+    image: redis:7-alpine
+    container_name: netstack-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.50
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Prometheus 監控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: netstack-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ../config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      netstack-core:
+        ipv4_address: 172.20.0.60
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local 

@@ -326,7 +326,7 @@ show_subscribers() {
         }).forEach(function(doc) {
             var slice = doc.slice && doc.slice[0] ? doc.slice[0] : {};
             var session = slice.session && slice.session[0] ? slice.session[0] : {};
-            var sliceType = slice.sst === 1 ? 'eMBB' : (slice.sst === 2 ? 'uRLLC' : 'Unknown');
+            var sliceType = slice.sst === 1 ? 'eMBB' : (slice.sst === 2 ? 'uRLLC' : (slice.sst === 3 ? 'mMTC' : 'Unknown'));
             print('IMSI: ' + doc.imsi + ', Slice: ' + sliceType + ' (SST=' + (slice.sst || 'N/A') + ', SD=' + (slice.sd || 'N/A') + '), APN: ' + (session.name || 'N/A'));
         });"
 }

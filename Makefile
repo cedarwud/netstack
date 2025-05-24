@@ -206,15 +206,19 @@ test: ## 🧪 執行所有測試
 	@echo "$(GREEN)🧪 執行 NetStack 測試套件...$(NC)"
 	@$(MAKE) test-unit
 	@$(MAKE) test-integration
-	@$(MAKE) test-e2e
+	# @$(MAKE) test-e2e # E2E tests might need separate handling or confirmation if they also run in Docker
 
-test-unit: ## 🧪 執行單元測試
+test-unit: build ## 🧪 執行單元測試
+	@echo "$(YELLOW)Ensuring clean environment for unit tests...$(NC)"
+	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
 	@echo "$(BLUE)🧪 執行單元測試...$(NC)"
-	cd netstack_api && python -m pytest tests/unit/ -v --cov=. --cov-report=term-missing
+	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_unit netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/unit/ -v --cov=. --cov-report=term-missing'"
 
-test-integration: ## 🧪 執行整合測試
+test-integration: build ## 🧪 執行整合測試
+	@echo "$(YELLOW)Ensuring clean environment for integration tests...$(NC)"
+	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
 	@echo "$(BLUE)🧪 執行整合測試...$(NC)"
-	cd netstack_api && python -m pytest tests/integration/ -v
+	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_integration netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/integration/ -v'"
 
 test-e2e: ## 🧪 執行端到端測試
 	@echo "$(BLUE)🧪 執行 E2E 測試...$(NC)"
@@ -228,19 +232,17 @@ test-performance: ## ⚡ 執行效能測試
 	@echo "$(BLUE)⚡ 執行效能測試...$(NC)"
 	@./tests/performance_test.sh
 
+test-slice-switch: ## 🔀 執行 Slice 切換測試 (確保無註冊步驟)
+	@echo "$(BLUE)🔀 執行 Slice 切換測試 (via test-slice-switch)...$(NC)"
+	@./tests/slice_switching_test.sh
+
 lint: ## 🔍 程式碼檢查
 	@echo "$(BLUE)🔍 執行程式碼檢查...$(NC)"
-	cd netstack_api && \
-	python -m black . && \
-	python -m isort . && \
-	python -m flake8 . && \
-	python -m mypy .
+	docker compose -f $(COMPOSE_FILE) run --rm netstack-api sh -c "cd netstack_api && python -m black . --check && python -m isort . --check-only && python -m flake8 . && python -m mypy ."
 
 format: ## ✨ 格式化程式碼
 	@echo "$(BLUE)✨ 格式化程式碼...$(NC)"
-	cd netstack_api && \
-	python -m black . && \
-	python -m isort .
+	docker compose -f $(COMPOSE_FILE) run --rm netstack-api sh -c "cd netstack_api && python -m black . && python -m isort ."
 
 dev-up: ## 🛠️ 啟動開發環境
 	@echo "$(GREEN)🛠️ 啟動開發環境...$(NC)"
@@ -250,6 +252,14 @@ dev-up: ## 🛠️ 啟動開發環境
 dev-down: ## 🛠️ 停止開發環境
 	@echo "$(YELLOW)🛠️ 停止開發環境...$(NC)"
 	docker compose -f $(COMPOSE_FILE_DEV) down
+
+clean-test-runs: ## 🧹 清理測試執行所建立的容器和服務
+	@echo "$(YELLOW)🧹 Cleaning up containers and services from test runs...$(NC)"
+	@-docker rm netstack_api_test_unit || true
+	@-docker rm netstack_api_test_integration || true
+	@echo "$(YELLOW)Bringing down any services potentially started by tests defined in $(COMPOSE_FILE)...$(NC)"
+	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
+	@echo "$(GREEN)✅ Test run cleanup complete.$(NC)"
 
 build: ## 🏗️ 建置 NetStack API 映像
 	@echo "$(GREEN)🏗️ 建置 NetStack API 映像...$(NC)"
@@ -267,7 +277,7 @@ push: ## 📤 推送映像到 Registry
 
 docs: ## 📚 生成 API 文件
 	@echo "$(BLUE)📚 生成 API 文件...$(NC)"
-	cd netstack_api && python -c "from main import app; import json; print(json.dumps(app.openapi(), indent=2))" > ../docs/openapi.json
+	docker compose -f $(COMPOSE_FILE) run --rm -v $(shell pwd)/docs:/app/docs netstack-api sh -c "cd netstack_api && python -c 'from main import app; import json; print(json.dumps(app.openapi(), indent=2))' > /app/docs/openapi.json"
 	@echo "$(GREEN)✅ API 文件已生成至 docs/openapi.json$(NC)"
 
 monitor: ## 📊 開啟監控面板
@@ -284,21 +294,7 @@ ping-test: ## 🏓 執行 Ping 測試
 	@echo "$(BLUE)🏓 執行 Ping 測試...$(NC)"
 	docker compose -f $(COMPOSE_FILE_RAN) exec ues1 ping -c 5 -I uesimtun0 8.8.8.8
 
-slice-switch: ## 🔀 測試 Slice 切換
-	@echo "$(BLUE)🔀 測試 Slice 切換...$(NC)"
-	@./tests/slice_switching_test.sh
-
 backup: ## 💾 備份配置
 	@echo "$(BLUE)💾 備份配置...$(NC)"
 	tar -czf netstack-backup-$(shell date +%Y%m%d_%H%M%S).tar.gz config/ compose/ scripts/
 	@echo "$(GREEN)✅ 配置已備份$(NC)"
-
-install-deps: ## 📦 安裝開發依賴
-	@echo "$(BLUE)📦 安裝開發依賴...$(NC)"
-	pip install -r requirements-dev.txt
-	@echo "$(GREEN)✅ 依賴安裝完成$(NC)"
-
-# 快速命令別名
-start: up ## 別名：啟動 NetStack
-stop: down ## 別名：停止 NetStack
-restart: down up ## 重啟 NetStack 

@@ -28,7 +28,9 @@ from .adapters.open5gs_adapter import Open5GSAdapter
 from .services.ue_service import UEService
 from .services.slice_service import SliceService, SliceType
 from .services.health_service import HealthService
+from .services.ueransim_service import UERANSIMConfigService
 from .models.requests import SliceSwitchRequest
+from .models.ueransim_models import UERANSIMConfigRequest, UERANSIMConfigResponse
 from .models.responses import (
     HealthResponse,
     UEInfoResponse,
@@ -125,6 +127,7 @@ async def lifespan(app: FastAPI):
     ue_service = UEService(mongo_adapter, redis_adapter)
     slice_service = SliceService(mongo_adapter, open5gs_adapter, redis_adapter)
     health_service = HealthService(mongo_adapter, redis_adapter)
+    ueransim_service = UERANSIMConfigService()
 
     # 儲存到應用程式狀態
     app.state.mongo_adapter = mongo_adapter
@@ -133,6 +136,7 @@ async def lifespan(app: FastAPI):
     app.state.ue_service = ue_service
     app.state.slice_service = slice_service
     app.state.health_service = health_service
+    app.state.ueransim_service = ueransim_service
 
     # 連接外部服務
     await mongo_adapter.connect()
@@ -457,6 +461,132 @@ async def get_slice_types():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "取得 Slice 類型失敗", "message": str(e)},
         )
+
+
+# ===== UERANSIM 動態配置端點 =====
+
+
+@app.post(
+    "/api/v1/ueransim/config/generate",
+    response_model=UERANSIMConfigResponse,
+    tags=["UERANSIM 配置"],
+)
+async def generate_ueransim_config(request: UERANSIMConfigRequest):
+    """
+    動態生成UERANSIM配置
+
+    根據衛星和UAV位置信息，動態生成適合的UERANSIM配置文件。
+    支援多種場景：LEO衛星過境、UAV編隊飛行、衛星間切換等。
+
+    Args:
+        request: UERANSIM配置生成請求
+
+    Returns:
+        生成的UERANSIM配置和相關信息
+    """
+    try:
+        ueransim_service = app.state.ueransim_service
+
+        logger.info(
+            "收到UERANSIM配置生成請求",
+            scenario=request.scenario.value,
+            satellite_id=request.satellite.id if request.satellite else None,
+            uav_id=request.uav.id if request.uav else None,
+        )
+
+        # 生成配置
+        result = await ueransim_service.generate_config(request)
+
+        if result.success:
+            logger.info(
+                "UERANSIM配置生成成功",
+                scenario=result.scenario_type,
+                message=result.message,
+            )
+        else:
+            logger.warning(
+                "UERANSIM配置生成失敗",
+                scenario=result.scenario_type,
+                message=result.message,
+            )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "UERANSIM配置生成異常", scenario=request.scenario.value, error=str(e)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "配置生成失敗", "message": str(e)},
+        )
+
+
+@app.get("/api/v1/ueransim/templates", tags=["UERANSIM 配置"])
+async def get_ueransim_templates():
+    """
+    取得可用的UERANSIM配置模板
+
+    Returns:
+        可用的配置模板列表
+    """
+    try:
+        ueransim_service = app.state.ueransim_service
+        templates = await ueransim_service.get_available_templates()
+
+        return {"success": True, "templates": templates, "total_count": len(templates)}
+
+    except Exception as e:
+        logger.error("取得UERANSIM模板失敗", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "取得模板失敗", "message": str(e)},
+        )
+
+
+@app.get("/api/v1/ueransim/scenarios", tags=["UERANSIM 配置"])
+async def get_supported_scenarios():
+    """
+    取得支援的場景類型
+
+    Returns:
+        支援的場景類型列表
+    """
+    from .models.ueransim_models import ScenarioType
+
+    scenarios = [
+        {
+            "type": ScenarioType.LEO_SATELLITE_PASS.value,
+            "name": "LEO衛星過境",
+            "description": "低軌衛星過境通信場景",
+            "required_params": ["satellite", "uav", "network_params"],
+        },
+        {
+            "type": ScenarioType.UAV_FORMATION_FLIGHT.value,
+            "name": "UAV編隊飛行",
+            "description": "多UAV協調編隊通信場景",
+            "required_params": ["satellite", "uav_formation", "network_params"],
+        },
+        {
+            "type": ScenarioType.HANDOVER_BETWEEN_SATELLITES.value,
+            "name": "衛星間切換",
+            "description": "UAV在不同衛星間的切換場景",
+            "required_params": [
+                "source_satellite",
+                "target_satellite",
+                "uav",
+                "handover_params",
+            ],
+        },
+        {
+            "type": ScenarioType.POSITION_UPDATE.value,
+            "name": "位置更新",
+            "description": "衛星或UAV位置變更的配置更新",
+            "required_params": ["satellite", "uav"],
+        },
+    ]
+
+    return {"success": True, "scenarios": scenarios, "total_count": len(scenarios)}
 
 
 # ===== 錯誤處理 =====

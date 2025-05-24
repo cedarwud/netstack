@@ -44,6 +44,10 @@ smf:
           sd: "0x222222"
           dnn:
             - internet
+        - sst: 3
+          sd: "0x333333"
+          dnn:
+            - internet
       tai:
         - plmn_id:
             mcc: 999
@@ -436,3 +440,82 @@ smf:
 #    confidentiality_protection_indication: required|preferred|not-needed
 #    maximum_integrity_protected_data_rate_uplink: bitrate64kbs|maximum-UE-rate
 #    maximum_integrity_protected_data_rate_downlink: bitrate64kbs|maximum-UE-rate
+
+# NTN特定配置
+ntn_config:
+  enabled: true
+  # 衛星延遲補償
+  delay_compensation:
+    enabled: true
+    min_delay_ms: 20        # 最小衛星延遲
+    max_delay_ms: 50        # 最大衛星延遲
+    adaptive_timeout: true  # 自適應超時
+  # QoS優化for NTN
+  qos_profiles:
+    # eMBB for NTN
+    - slice_sst: 1
+      slice_sd: "0x111111"
+      qci: 9
+      priority_level: 8
+      packet_delay_budget: 300   # 300ms (標準150ms增加到300ms)
+      packet_error_loss_rate: 1e-6
+      maximum_data_burst: 2000   # 2MB burst for satellite links
+    # uRLLC for NTN  
+    - slice_sst: 2
+      slice_sd: "0x222222"
+      qci: 1
+      priority_level: 2
+      packet_delay_budget: 5     # 5ms (嚴格要求，但考慮衛星延遲)
+      packet_error_loss_rate: 1e-6
+      maximum_data_burst: 500    # 500KB burst
+    # mMTC for NTN
+    - slice_sst: 3
+      slice_sd: "0x333333"
+      qci: 6
+      priority_level: 6
+      packet_delay_budget: 1000  # 1s (IoT設備較寬鬆)
+      packet_error_loss_rate: 1e-4
+      maximum_data_burst: 100    # 100KB burst
+  # 會話管理優化
+  session_management:
+    # PDU會話建立超時（適應衛星延遲）
+    pdu_session_establishment_timeout: 60  # 60秒 (標準30秒)
+    pdu_session_modification_timeout: 30   # 30秒 (標準15秒)
+    pdu_session_release_timeout: 30        # 30秒 (標準15秒)
+    # 重傳參數
+    max_retries: 5                        # 最大重傳次數
+    retry_interval: 10                    # 重傳間隔(秒)
+    # 衛星切換支持
+    satellite_handover:
+      enabled: true
+      prediction_window: 120              # 2分鐘預測窗口
+      pre_setup_time: 30                  # 30秒預建立時間
+      buffering_time: 10                  # 10秒緩衝時間
+  # 流量整形for衛星鏈路
+  traffic_shaping:
+    enabled: true
+    # 上行流量整形（UAV到衛星）
+    uplink:
+      rate_limit_mbps: 10                 # 10Mbps上行限制
+      burst_size_mb: 5                    # 5MB突發大小
+      priority_queue_size: 1000           # 優先隊列大小
+    # 下行流量整形（衛星到UAV）  
+    downlink:
+      rate_limit_mbps: 50                 # 50Mbps下行限制
+      burst_size_mb: 20                   # 20MB突發大小
+      priority_queue_size: 2000           # 優先隊列大小
+    # 衛星鏈路質量監控
+    link_quality_monitoring:
+      enabled: true
+      monitoring_interval: 5               # 5秒監控間隔
+      signal_threshold_db: -100            # 信號閾值
+      quality_indicators:
+        - rsrp                             # 參考信號接收功率
+        - rsrq                             # 參考信號接收質量
+        - sinr                             # 信噪干擾比
+        - bler                             # 塊錯誤率
+      # 自動調整參數
+      adaptive_adjustment:
+        enabled: true
+        adjustment_step: 0.1               # 調整步長
+        max_adjustment: 0.5                # 最大調整幅度

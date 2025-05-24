@@ -3,10 +3,6 @@
 # NetStack E2E 測試腳本
 # 完整測試 NetStack 系統功能，包括 UE 註冊、Slice 切換和連線測試
 
-# 添加調試輸出
-echo "開始執行腳本..."
-set -x  # 顯示所有執行的命令
-
 set -e
 
 # 顏色定義
@@ -210,7 +206,7 @@ stress_test() {
     
     if [ $success_rate -ge 80 ]; then
         log_info "✅ 壓力測試通過"
-    set +e  # Disable strict error checking
+        return 0
     else
         log_error "❌ 壓力測試失敗，成功率過低"
         return 1
@@ -236,13 +232,13 @@ main() {
     echo -e "\n📋 執行基本功能測試..."
     
     if test_health_check; then ((passed++)); else ((failed++)); fi
-    echo -e "\n" || true
+    echo ""
     
     if test_list_ues; then ((passed++)); else ((failed++)); fi
-    echo -e "\n" || true
+    echo ""
     
     if test_slice_types; then ((passed++)); else ((failed++)); fi
-    echo -e "\n" || true
+    echo ""
     
     # 檢查測試 UE 是否存在
     if test_get_ue_info; then
@@ -292,4 +288,4 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # 執行主程式
-main "$@"
+main "$@" 

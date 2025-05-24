@@ -222,7 +222,7 @@ test-integration: build ## 🧪 執行整合測試
 
 test-e2e: ## 🧪 執行端到端測試
 	@echo "$(BLUE)🧪 執行 E2E 測試...$(NC)"
-	@./tests/e2e_netstack.sh
+	@./tests/fixed_e2e_test.sh
 
 test-connectivity: ## 🌐 測試 UE 連線
 	@echo "$(BLUE)🌐 測試 UE 連線...$(NC)"

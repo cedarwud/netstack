@@ -51,7 +51,6 @@ down: ## 🧹 清理容器但保留數據庫資料
 	docker compose -f $(COMPOSE_FILE_RAN) down 2>/dev/null || true
 	docker compose -f $(COMPOSE_FILE) down
 	docker network prune -f
-	docker system prune -f
 	@echo "$(GREEN)✅ 清理完成 (數據已保留)$(NC)"
 
 down-v: ## 🛑 停止 NetStack
@@ -68,7 +67,6 @@ clean: ## 🧹 清理所有容器和資料
 	docker compose -f $(COMPOSE_FILE) down -v
 	docker volume prune -f
 	docker network prune -f
-	docker system prune -af
 	docker rmi netstack-api:latest 2>/dev/null || true
 	@echo "$(GREEN)✅ 清理完成$(NC)"
 

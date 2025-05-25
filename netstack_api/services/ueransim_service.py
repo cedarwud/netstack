@@ -192,43 +192,80 @@ class UERANSIMConfigService:
             ),
         )
 
-        # 為每個UAV生成UE配置
+        # 為每個UAV生成UE配置，如果沒有編隊則生成默認配置
         ue_configs = []
-        for i, uav in enumerate(formation):
-            # 根據角色調整優先級
-            priority_slice = "01:111111" if uav.role == "leader" else "02:222222"
+        if formation:
+            for i, uav in enumerate(formation):
+                # 根據角色調整優先級
+                priority_slice = "01:111111" if uav.role == "leader" else "02:222222"
 
-            ue_config = UEConfig(
-                supi=f"imsi-99970000{str(i+1).zfill(7)}",
-                imei=f"35693803{str(i+1).zfill(8)}",
-                initial_slice=priority_slice,
-            )
-            ue_configs.append(ue_config)
+                ue_config = UEConfig(
+                    supi=f"imsi-99970000{str(i+1).zfill(7)}",
+                    imei=f"35693803{str(i+1).zfill(8)}",
+                    initial_slice=priority_slice,
+                )
+                ue_configs.append(ue_config)
+        else:
+            # 如果沒有編隊數據，生成默認的3機編隊配置
+            self.logger.warning("沒有提供UAV編隊數據，生成默認3機編隊配置")
+            for i in range(3):
+                ue_config = UEConfig(
+                    supi=f"imsi-99970000{str(i+1).zfill(7)}",
+                    imei=f"35693803{str(i+1).zfill(8)}",
+                    initial_slice=(
+                        "01:111111" if i == 0 else "02:222222"
+                    ),  # 第一個為leader
+                )
+                ue_configs.append(ue_config)
 
         # 計算編隊中心位置
-        center_lat = (
-            sum(uav.latitude for uav in formation) / len(formation) if formation else 0
-        )
-        center_lon = (
-            sum(uav.longitude for uav in formation) / len(formation) if formation else 0
-        )
+        if formation:
+            center_lat = sum(uav.latitude for uav in formation) / len(formation)
+            center_lon = sum(uav.longitude for uav in formation) / len(formation)
+        else:
+            # 默認編隊中心位置
+            center_lat = 25.0
+            center_lon = 121.0
+
+        # 生成YAML配置（確保總是有配置）
+        config_yaml = None
+        try:
+            if ue_configs:
+                config_yaml = self._generate_formation_yaml_config(
+                    gnb_config, ue_configs, request.scenario
+                )
+                self.logger.info(
+                    "UAV編隊YAML配置生成成功",
+                    formation_size=len(ue_configs),
+                    config_length=len(config_yaml) if config_yaml else 0,
+                )
+            else:
+                self.logger.error("無法生成UE配置，編隊數據無效")
+        except Exception as e:
+            self.logger.error("UAV編隊YAML配置生成失敗", error=str(e))
+            # 生成備用配置
+            config_yaml = self._generate_fallback_formation_config(
+                gnb_config, request.scenario
+            )
 
         return UERANSIMConfigResponse(
             success=True,
             scenario_type=request.scenario.value,
             gnb_config=gnb_config,
             ue_configs=ue_configs,
+            config_yaml=config_yaml,
             scenario_info=ScenarioInfo(
                 scenario_type=request.scenario.value,
                 generation_time=datetime.utcnow().isoformat(),
                 satellite_info=satellite.dict() if satellite else None,
                 uav_info={
-                    "formation_size": len(formation),
+                    "formation_size": len(ue_configs),
                     "center_position": {"lat": center_lat, "lon": center_lon},
                     "coordination_required": network_params.coordination_required,
+                    "is_default_formation": not bool(formation),
                 },
             ),
-            message=f"UAV編隊配置生成成功，包含{len(ue_configs)}個UE",
+            message=f"UAV編隊配置生成成功，包含{len(ue_configs)}個UE{'（默認配置）' if not formation else ''}",
         )
 
     async def _generate_handover_config(
@@ -273,11 +310,27 @@ class UERANSIMConfigService:
             imei=f"35693803{uav.id[-8:].zfill(8)}" if uav else "356938035643803",
         )
 
+        # 生成YAML配置（使用第一個gNB作為主配置）
+        config_yaml = None
+        if gnb_configs:
+            try:
+                config_yaml = self._generate_handover_yaml_config(
+                    gnb_configs, ue_config, request.scenario
+                )
+                self.logger.info(
+                    "切換場景YAML配置生成成功",
+                    config_length=len(config_yaml) if config_yaml else 0,
+                )
+            except Exception as e:
+                self.logger.error("切換場景YAML配置生成失敗", error=str(e))
+                config_yaml = None
+
         return UERANSIMConfigResponse(
             success=True,
             scenario_type=request.scenario.value,
             gnb_configs=gnb_configs,
             ue_config=ue_config,
+            config_yaml=config_yaml,
             scenario_info=ScenarioInfo(
                 scenario_type=request.scenario.value,
                 generation_time=datetime.utcnow().isoformat(),
@@ -407,6 +460,170 @@ class UERANSIMConfigService:
         }
 
         return yaml.dump(config_dict, default_flow_style=False, allow_unicode=True)
+
+    def _generate_handover_yaml_config(
+        self, gnb_configs: List[GNBConfig], ue_config: UEConfig, scenario: ScenarioType
+    ) -> str:
+        """生成切換場景的YAML格式配置"""
+        config_dict = {
+            "scenario": scenario.value,
+            "generation_time": datetime.utcnow().isoformat(),
+            "handover_config": {
+                "source_gnb": (
+                    {
+                        "mcc": gnb_configs[0].mcc,
+                        "mnc": gnb_configs[0].mnc,
+                        "nci": gnb_configs[0].nci,
+                        "idLength": gnb_configs[0].id_length,
+                        "tac": gnb_configs[0].tac,
+                        "linkIp": gnb_configs[0].link_ip,
+                        "ngapIp": gnb_configs[0].ngap_ip,
+                        "gtpIp": gnb_configs[0].gtp_ip,
+                        "frequency": gnb_configs[0].frequency,
+                        "txPower": gnb_configs[0].tx_power,
+                    }
+                    if len(gnb_configs) > 0
+                    else None
+                ),
+                "target_gnb": (
+                    {
+                        "mcc": gnb_configs[1].mcc,
+                        "mnc": gnb_configs[1].mnc,
+                        "nci": gnb_configs[1].nci,
+                        "idLength": gnb_configs[1].id_length,
+                        "tac": gnb_configs[1].tac,
+                        "linkIp": gnb_configs[1].link_ip,
+                        "ngapIp": gnb_configs[1].ngap_ip,
+                        "gtpIp": gnb_configs[1].gtp_ip,
+                        "frequency": gnb_configs[1].frequency,
+                        "txPower": gnb_configs[1].tx_power,
+                    }
+                    if len(gnb_configs) > 1
+                    else None
+                ),
+            },
+            "ue": {
+                "supi": ue_config.supi,
+                "mcc": ue_config.mcc,
+                "mnc": ue_config.mnc,
+                "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+                "op": ue_config.op,
+                "amf": ue_config.amf,
+                "imei": ue_config.imei,
+                "imeisv": "4370816125816151",
+                "sessions": [
+                    {
+                        "type": "IPv4",
+                        "apn": "internet",
+                        "slice": {"sst": 1, "sd": "0x111111"},
+                    }
+                ],
+            },
+        }
+
+        return yaml.dump(config_dict, default_flow_style=False, allow_unicode=True)
+
+    def _generate_formation_yaml_config(
+        self, gnb_config: GNBConfig, ue_configs: List[UEConfig], scenario: ScenarioType
+    ) -> str:
+        """生成編隊場景的YAML格式配置"""
+        config_dict = {
+            "scenario": scenario.value,
+            "generation_time": datetime.utcnow().isoformat(),
+            "gnb": {
+                "mcc": gnb_config.mcc,
+                "mnc": gnb_config.mnc,
+                "nci": gnb_config.nci,
+                "idLength": gnb_config.id_length,
+                "tac": gnb_config.tac,
+                "linkIp": gnb_config.link_ip,
+                "ngapIp": gnb_config.ngap_ip,
+                "gtpIp": gnb_config.gtp_ip,
+                "frequency": gnb_config.frequency,
+                "txPower": gnb_config.tx_power,
+            },
+            "formation": {
+                "size": len(ue_configs),
+                "ues": [
+                    {
+                        "supi": ue.supi,
+                        "mcc": ue.mcc,
+                        "mnc": ue.mnc,
+                        "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+                        "op": ue.op,
+                        "amf": ue.amf,
+                        "imei": ue.imei,
+                        "initial_slice": ue.initial_slice,
+                    }
+                    for ue in ue_configs
+                ],
+            },
+        }
+
+        return yaml.dump(config_dict, default_flow_style=False, allow_unicode=True)
+
+    def _generate_fallback_formation_config(
+        self, gnb_config: GNBConfig, scenario: ScenarioType
+    ) -> str:
+        """生成備用編隊配置"""
+        fallback_config = {
+            "scenario": scenario.value,
+            "generation_time": datetime.utcnow().isoformat(),
+            "warning": "This is a fallback configuration due to missing UAV formation data",
+            "gnb": {
+                "mcc": gnb_config.mcc,
+                "mnc": gnb_config.mnc,
+                "nci": gnb_config.nci,
+                "idLength": gnb_config.id_length,
+                "tac": gnb_config.tac,
+                "linkIp": gnb_config.link_ip,
+                "ngapIp": gnb_config.ngap_ip,
+                "gtpIp": gnb_config.gtp_ip,
+                "frequency": gnb_config.frequency,
+                "txPower": gnb_config.tx_power,
+            },
+            "formation": {
+                "size": 3,
+                "type": "default_triangle",
+                "ues": [
+                    {
+                        "supi": "imsi-999700000000001",
+                        "role": "leader",
+                        "mcc": 999,
+                        "mnc": 70,
+                        "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+                        "op": "E8ED289DEBA952E4283B54E88E6183CA",
+                        "amf": "8000",
+                        "imei": "356938035643801",
+                        "initial_slice": "01:111111",
+                    },
+                    {
+                        "supi": "imsi-999700000000002",
+                        "role": "follower",
+                        "mcc": 999,
+                        "mnc": 70,
+                        "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+                        "op": "E8ED289DEBA952E4283B54E88E6183CA",
+                        "amf": "8000",
+                        "imei": "356938035643802",
+                        "initial_slice": "02:222222",
+                    },
+                    {
+                        "supi": "imsi-999700000000003",
+                        "role": "follower",
+                        "mcc": 999,
+                        "mnc": 70,
+                        "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+                        "op": "E8ED289DEBA952E4283B54E88E6183CA",
+                        "amf": "8000",
+                        "imei": "356938035643803",
+                        "initial_slice": "02:222222",
+                    },
+                ],
+            },
+        }
+
+        return yaml.dump(fallback_config, default_flow_style=False, allow_unicode=True)
 
     async def get_available_templates(self) -> List[Dict]:
         """獲取可用的配置模板"""

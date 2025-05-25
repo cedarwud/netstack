@@ -5,14 +5,13 @@
 RED=\033[0;31m
 GREEN=\033[0;32m
 YELLOW=\033[1;33m
-BLUE=\033[0;34m
+BLUE=\033[1;34m
 NC=\033[0m # No Color
 
 # 專案設定
 PROJECT_NAME := netstack
 COMPOSE_FILE := compose/core.yaml
 COMPOSE_FILE_RAN := compose/ran.yaml
-COMPOSE_FILE_DEV := compose/dev.yaml
 
 help: ## 顯示可用的命令
 	@echo "$(GREEN)NetStack v1.0 - 可用命令：$(NC)"
@@ -28,21 +27,61 @@ up: build ## 🚀 啟動 NetStack 核心網
 	@sleep 10
 	@$(MAKE) status
 
-down: ## 🛑 停止 NetStack
-	@echo "$(YELLOW)🛑 停止 NetStack...$(NC)"
+# 完整工作流程命令
+dev-up: ## 🛠️ 完整的開發環境設置 (保留數據)
+	@echo "$(GREEN)🛠️ 設置開發環境...$(NC)"
+	@$(MAKE) down
+	@$(MAKE) up
+	@$(MAKE) register-subscribers
+	@$(MAKE) start-ran
+	@sleep 15
+	@echo "$(GREEN)✅ 開發環境設置完成，可開始測試$(NC)"
+
+dev-fresh: ## 🆕 全新環境設置 (清除所有數據)
+	@echo "$(GREEN)🆕 設置全新環境...$(NC)"
+	@$(MAKE) clean
+	@$(MAKE) up
+	@$(MAKE) register-subscribers
+	@$(MAKE) start-ran
+	@sleep 15
+	@echo "$(GREEN)✅ 全新環境設置完成，可開始測試$(NC)"
+
+down: ## 🧹 清理容器但保留數據庫資料
+	@echo "$(YELLOW)🧹 清理 NetStack 資源 (保留數據)...$(NC)"
 	docker compose -f $(COMPOSE_FILE_RAN) down 2>/dev/null || true
 	docker compose -f $(COMPOSE_FILE) down
+	docker network prune -f
+	docker system prune -f
+	@echo "$(GREEN)✅ 清理完成 (數據已保留)$(NC)"
+
+down-v: ## 🛑 停止 NetStack
+	@echo "$(YELLOW)🛑 停止 NetStack...$(NC)"
+	docker compose -f $(COMPOSE_FILE_RAN) down -v 2>/dev/null || true
+	docker compose -f $(COMPOSE_FILE) down -v
+	docker volume prune -f
+	docker network prune -f
 	@echo "$(GREEN)✅ NetStack 已停止$(NC)"
 
 clean: ## 🧹 清理所有容器和資料
 	@echo "$(YELLOW)🧹 清理 NetStack 資源...$(NC)"
 	docker compose -f $(COMPOSE_FILE_RAN) down -v 2>/dev/null || true
 	docker compose -f $(COMPOSE_FILE) down -v
-	docker system prune -af
 	docker volume prune -f
 	docker network prune -f
+	docker system prune -af
 	docker rmi netstack-api:latest 2>/dev/null || true
 	@echo "$(GREEN)✅ 清理完成$(NC)"
+
+clean-data-only: ## 🗑️ 僅清理數據庫資料 (保留容器)
+	@echo "$(RED)🗑️ 清理數據庫資料...$(NC)"
+	@echo "$(YELLOW)⚠️ 警告: 這將刪除所有用戶資料和監控數據！$(NC)"
+	@read -p "確定要繼續嗎？(y/N): " choice; \
+	if [ "$$choice" = "y" ] || [ "$$choice" = "Y" ]; then \
+		docker volume rm -f netstack_mongo_data netstack_redis_data netstack_prometheus_data 2>/dev/null || true; \
+		echo "$(GREEN)✅ 數據清理完成$(NC)"; \
+	else \
+		echo "$(YELLOW)已取消數據清理$(NC)"; \
+	fi
 
 status: ## 📊 檢查服務狀態
 	@echo "$(BLUE)📊 NetStack 服務狀態：$(NC)"
@@ -71,6 +110,10 @@ register-subscribers: ## 👤 註冊所有預定義測試用戶 (eMBB, uRLLC, mM
 	@echo "$(GREEN)✅ 用戶註冊完成$(NC)"
 	@echo "$(BLUE)檢查註冊結果：$(NC)"
 	@docker run --rm --net compose_netstack-core mongo:6.0 mongosh "mongodb://172.20.0.10:27017/open5gs" --quiet --eval "print('總用戶數: ' + db.subscribers.countDocuments({})); var embb = db.subscribers.countDocuments({'slice.sst': 1}); var urllc = db.subscribers.countDocuments({'slice.sst': 2}); var mmtc = db.subscribers.countDocuments({'slice.sst': 3}); print('eMBB 用戶: ' + embb + ', uRLLC 用戶: ' + urllc + ', mMTC 用戶: ' + mmtc);" 2>/dev/null || echo "無法連接資料庫"
+	@echo "$(YELLOW)重啟核心網服務以確保用戶資料生效...$(NC)"
+	@docker compose -f $(COMPOSE_FILE) restart amf udm udr ausf
+	@sleep 10
+	@echo "$(GREEN)✅ 服務重啟完成，用戶資料已生效$(NC)"
 
 add-subscriber: ## 👤 新增單一測試用戶 (使用: make add-subscriber IMSI=.. KEY=.. OPC=.. APN=.. SST=.. SD=..)
 	@echo "$(GREEN)👤 新增單一測試用戶...$(NC)"
@@ -159,18 +202,6 @@ subscriber-docs: ## 📘 顯示完整的用戶管理功能文檔
 	@echo "  $(MAGENTA)make export-subscribers [FILE=subscribers.json]$(NC)"
 	@echo ""
 	@echo "$(YELLOW)======================================================$(NC)"
-	@echo "$(CYAN)參數說明:$(NC)"
-	@echo ""
-	@echo "- $(GREEN)IMSI$(NC): 國際移動用戶識別碼 (例: 999700000000001)"
-	@echo "- $(GREEN)KEY$(NC): 認證金鑰 (例: 465B5CE8B199B49FAA5F0A2EE238A6BC)"
-	@echo "- $(GREEN)OPC$(NC): 操作碼 (例: E8ED289DEBA952E4283B54E88E6183CA)"
-	@echo "- $(GREEN)APN$(NC): 接入點名稱 (預設: internet)"
-	@echo "- $(GREEN)SST$(NC): Slice 類型 (預設: 1=eMBB，2=uRLLC，3=mMTC)"
-	@echo "- $(GREEN)SD$(NC): Slice 區分符 (例: 0x111111)"
-	@echo "- $(GREEN)SLICE$(NC): Slice 類型名稱 (eMBB、uRLLC 或 mMTC)"
-	@echo "- $(GREEN)FILE$(NC): 導出檔案名稱 (預設: subscribers_export.json)"
-	@echo ""
-	@echo "$(YELLOW)======================================================$(NC)"
 
 subscriber-help: ## 📚 顯示用戶管理相關指令說明
 	@echo "$(BLUE)📚 NetStack 用戶管理指令說明：$(NC)"
@@ -211,24 +242,6 @@ stop-ran: ## 📡 停止 RAN 模擬器
 	docker compose -f $(COMPOSE_FILE_RAN) down
 	@echo "$(GREEN)✅ RAN 模擬器已停止$(NC)"
 
-# test: ## 🧪 執行所有測試
-# 	@echo "$(GREEN)🧪 執行 NetStack 測試套件...$(NC)"
-# 	@$(MAKE) test-unit
-# 	@$(MAKE) test-integration
-# 	# @$(MAKE) test-e2e # E2E tests might need separate handling or confirmation if they also run in Docker
-
-# test-unit: build ## 🧪 執行單元測試
-# 	@echo "$(YELLOW)Ensuring clean environment for unit tests...$(NC)"
-# 	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
-# 	@echo "$(BLUE)🧪 執行單元測試...$(NC)"
-# 	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_unit netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/unit/ -v --cov=. --cov-report=term-missing'"
-
-# test-integration: build ## 🧪 執行整合測試
-# 	@echo "$(YELLOW)Ensuring clean environment for integration tests...$(NC)"
-# 	@-docker compose -f $(COMPOSE_FILE) down --remove-orphans
-# 	@echo "$(BLUE)🧪 執行整合測試...$(NC)"
-# 	docker compose -f $(COMPOSE_FILE) run -u root -v $(shell pwd)/netstack_api:/app/netstack_api --name netstack_api_test_integration netstack-api sh -c "chown -R netstack:netstack /app/netstack_api && su netstack -c 'cd netstack_api && python -m pytest tests/integration/ -v'"
-
 test-e2e: ## 🧪 執行端到端測試
 	@echo "$(BLUE)🧪 執行 E2E 測試...$(NC)"
 	@./tests/e2e_netstack.sh
@@ -245,6 +258,39 @@ test-slice-switch: ## 🔀 執行 Slice 切換測試 (確保無註冊步驟)
 	@echo "$(BLUE)🔀 執行 Slice 切換測試 (via test-slice-switch)...$(NC)"
 	@./tests/slice_switching_test.sh
 
+test-ntn-latency: ## 🛰️ 執行 NTN 高延遲場景測試
+	@echo "$(BLUE)🛰️ 執行 NTN 高延遲場景測試...$(NC)"
+	@./tests/ntn_latency_test.sh
+
+test-ueransim-config: ## 📡 執行 UERANSIM 動態配置測試  
+	@echo "$(BLUE)📡 執行 UERANSIM 動態配置測試...$(NC)"
+	@./tests/ueransim_config_test.sh
+
+test-ntn-config-validation: ## ✅ 執行 NTN 配置驗證測試
+	@echo "$(BLUE)✅ 執行 NTN 配置驗證測試...$(NC)"
+	@./tests/ntn_config_validation_test.sh
+
+test-quick-ntn-validation: ## ⚡ 執行快速 NTN 驗證測試
+	@echo "$(BLUE)⚡ 執行快速 NTN 驗證測試...$(NC)"
+	@./tests/quick_ntn_validation.sh
+
+test-all-ntn: ## 🚀 執行所有 NTN 相關測試
+	@echo "$(GREEN)🚀 執行所有 NTN 相關測試...$(NC)"
+	@$(MAKE) test-ntn-latency
+	@$(MAKE) test-ueransim-config
+	@$(MAKE) test-ntn-config-validation
+	@$(MAKE) test-quick-ntn-validation
+	@echo "$(GREEN)✅ 所有 NTN 測試完成$(NC)"
+
+test-all: ## 🧪 執行所有測試 (包含 NTN 測試)
+	@echo "$(GREEN)🧪 執行完整測試套件...$(NC)"
+	@$(MAKE) test-e2e
+	@$(MAKE) test-connectivity
+	@$(MAKE) test-performance
+	@$(MAKE) test-slice-switch
+	@$(MAKE) test-all-ntn
+	@echo "$(GREEN)✅ 所有測試完成$(NC)"
+
 lint: ## 🔍 程式碼檢查
 	@echo "$(BLUE)🔍 執行程式碼檢查...$(NC)"
 	docker compose -f $(COMPOSE_FILE) run --rm netstack-api sh -c "cd netstack_api && python -m black . --check && python -m isort . --check-only && python -m flake8 . && python -m mypy ."
@@ -252,15 +298,6 @@ lint: ## 🔍 程式碼檢查
 format: ## ✨ 格式化程式碼
 	@echo "$(BLUE)✨ 格式化程式碼...$(NC)"
 	docker compose -f $(COMPOSE_FILE) run --rm netstack-api sh -c "cd netstack_api && python -m black . && python -m isort ."
-
-dev-up: ## 🛠️ 啟動開發環境
-	@echo "$(GREEN)🛠️ 啟動開發環境...$(NC)"
-	docker compose -f $(COMPOSE_FILE_DEV) up -d
-	@echo "$(GREEN)✅ 開發環境啟動完成$(NC)"
-
-dev-down: ## 🛠️ 停止開發環境
-	@echo "$(YELLOW)🛠️ 停止開發環境...$(NC)"
-	docker compose -f $(COMPOSE_FILE_DEV) down
 
 clean-test-runs: ## 🧹 清理測試執行所建立的容器和服務
 	@echo "$(YELLOW)🧹 Cleaning up containers and services from test runs...$(NC)"
@@ -307,3 +344,33 @@ backup: ## 💾 備份配置
 	@echo "$(BLUE)💾 備份配置...$(NC)"
 	tar -czf netstack-backup-$(shell date +%Y%m%d_%H%M%S).tar.gz config/ compose/ scripts/
 	@echo "$(GREEN)✅ 配置已備份$(NC)"
+
+verify-setup: ## ✅ 驗證環境設置是否正確
+	@echo "$(BLUE)✅ 驗證環境設置...$(NC)"
+	@echo "1. 檢查核心網服務狀態..."
+	@$(MAKE) status
+	@echo ""
+	@echo "2. 檢查用戶註冊狀態..."
+	@$(MAKE) show-subscribers
+	@echo ""
+	@echo "3. 測試 UE 連線..."
+	@$(MAKE) test-connectivity
+	@echo "$(GREEN)✅ 環境驗證完成$(NC)"
+
+diagnose: ## 🔍 診斷 UE 連線問題
+	@echo "$(BLUE)🔍 執行 UE 連線診斷...$(NC)"
+	@./scripts/diagnose_ue_connectivity.sh
+
+fix-connectivity: ## 🔧 自動修復常見連線問題
+	@echo "$(YELLOW)🔧 自動修復 UE 連線問題...$(NC)"
+	@echo "步驟 1: 重新註冊用戶..."
+	@$(MAKE) register-subscribers
+	@echo "步驟 2: 重啟 RAN 模擬器..."
+	@$(MAKE) stop-ran
+	@sleep 5
+	@$(MAKE) start-ran
+	@echo "步驟 3: 等待服務穩定..."
+	@sleep 15
+	@echo "步驟 4: 測試連線..."
+	@$(MAKE) test-connectivity
+	@echo "$(GREEN)✅ 修復完成$(NC)"

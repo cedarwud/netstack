@@ -1,4 +1,85 @@
-make clean # 完全清理
+make dev-up
+make test-connectivity
+make test-e2e
+make test-performance
+make test-slice-switch
+make test-ntn-latency
+make test-ueransim-config
+make test-ntn-config-validation
+make test-quick-ntn-validation
+
+✅ 使用 make setup-development 進行日常開發
+✅ 用戶資料會自動保留，無需重新註冊
+✅ 如果遇到問題，make fix-connectivity 自動修復
+✅ 完全掌控何時清理數據 (make clean-data-only)
+
+日常開發流程 (推薦)
+
+# 第一次設置
+
+make setup-development
+
+# 日常重啟 (保留用戶資料)
+
+make clean-keep-data && make up && make start-ran
+
+# 如果連線有問題
+
+make fix-connectivity
+
+完全重置流程 (僅在必要時)
+
+# 完全清理並重新設置
+
+make setup-fresh
+
+快速排查流程
+
+# 診斷問題
+
+make diagnose
+
+# 如果有問題，自動修復
+
+make fix-connectivity
+
+1. 新增分層清理命令
+
+# 🛠️ 日常開發使用 (保留數據)
+
+make clean-keep-data
+
+# 🆕 完全清理 (僅在必要時)
+
+make clean
+
+# 🗑️ 僅清理數據 (選擇性)
+
+make clean-data-only
+
+2. 完整工作流程命令
+
+# 🛠️ 開發環境設置 (推薦日常使用)
+
+make setup-development
+
+# 🆕 全新環境設置 (首次使用或完全清理後)
+
+make setup-fresh
+
+# ✅ 驗證環境
+
+make verify-setup 3. 智能診斷與修復
+
+# 🔍 自動診斷問題
+
+make diagnose
+
+# 🔧 一鍵修復連線問題
+
+make fix-connectivity
+
+make down-v # 清理
 make up # 啟動核心服務  
 make start-ran # 啟動 RAN 模擬器
 make register-subscribers # 註冊用戶
@@ -6,6 +87,13 @@ make test-connectivity # 測試 UE 網路連線
 make test-e2e # 完整 API 業務流程
 make test-performance # 系統效能
 make test-slice-switch # 網路切片切換
+make down-v # 完全清理
+make up # 啟動核心服務  
+make start-ran # 啟動 RAN 模擬器
+make test-ntn-latency # NTN 高延遲場景測試
+make test-ueransim-config # UERANSIM 動態配置測試
+make test-ntn-config-validation # NTN 配置驗證測試
+make test-quick-ntn-validation # 快速功能驗證
 
 # NetStack v1.0 - Open5GS + UERANSIM 雙 Slice 核心網堆疊
 
@@ -59,27 +147,40 @@ NetStack 是基於 [Open5GS](https://github.com/open5gs/open5gs) 和 [UERANSIM](
 git clone https://github.com/yourlorg/netstack.git
 cd netstack
 
-# 一鍵啟動核心網
-make up
+# 🆕 全新環境 (首次使用或需要完全清理)
+make setup-fresh
 
-# 註冊測試用戶 (包含 eMBB, uRLLC 和 mMTC 三種切片類型)
-make register-subscribers
+# 🛠️ 開發環境 (保留數據庫資料，適合日常開發)
+make setup-development
+
+# ✅ 驗證環境是否正確設置
+make verify-setup
 ```
 
-### 2. 測試連線
+### 2. 日常開發流程
 
 ```bash
-# 執行 E2E 測試
-make test-e2e
+# 保留數據的重啟 (推薦用於日常開發)
+make clean-keep-data && make up && make start-ran
 
-# 啟動 RAN 模擬器
-make start-ran
+# 如果 UE 連線失敗，重新註冊用戶 (會自動重啟相關服務)
+make register-subscribers
 
-# 測試 UE 連線
+# 測試連線
 make test-connectivity
 ```
 
-### 3. API 介面
+### 3. 完全清理 (僅在必要時使用)
+
+```bash
+# ⚠️ 注意：這會刪除所有數據，包括用戶註冊資料
+make clean
+
+# 清理後需要重新設置
+make setup-fresh
+```
+
+### 4. API 介面
 
 NetStack API 可在 http://localhost:8080 取得：
 

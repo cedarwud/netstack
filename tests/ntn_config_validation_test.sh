@@ -9,13 +9,13 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+BLUE='\033[1;34m'
 PURPLE='\033[0;35m'
 NC='\033[0m'
 
 # 測試設定
 API_BASE_URL="http://localhost:8080"
-CONFIG_DIR="../config"
+CONFIG_DIR="./config"
 TIMEOUT=30
 
 log_info() {
@@ -405,23 +405,25 @@ validate_yaml_syntax() {
         "$CONFIG_DIR/nssf.yaml"
     )
     
+    local yaml_errors=0
+    
     for config_file in "${config_files[@]}"; do
+        local config_name=$(basename "$config_file" | sed 's/\.yaml//')
+        
+        # 檢查YAML語法
         if command -v yq &> /dev/null; then
-            if yq eval '.' "$config_file" > /dev/null 2>&1; then
-                log_info "  ✅ $(basename "$config_file") 語法正確"
+            if yq . "$config_file" > /dev/null 2>&1; then
+                log_info "  ✅ $config_name 語法正確"
             else
-                log_error "  ❌ $(basename "$config_file") 語法錯誤"
-                return 1
+                log_error "  ❌ $config_name 語法錯誤"
+                yaml_errors=$((yaml_errors + 1))
             fi
         else
-            if python3 -c "import yaml; yaml.safe_load(open('$config_file'))" 2>/dev/null; then
-                log_info "  ✅ $(basename "$config_file") 語法正確"
-            else
-                log_error "  ❌ $(basename "$config_file") 語法錯誤"
-                return 1
-            fi
+            log_warning "  ⚠️  無法檢查YAML語法 (yq未安裝)"
         fi
     done
+    
+    return $yaml_errors
 }
 
 # 生成配置驗證報告

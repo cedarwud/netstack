@@ -307,7 +307,7 @@ clean-test-runs: ## 🧹 清理測試執行所建立的容器和服務
 
 build: ## 🏗️ 建置 NetStack API 映像
 	@echo "$(GREEN)🏗️ 建置 NetStack API 映像...$(NC)"
-	docker build -t netstack-api:latest -f docker/Dockerfile .
+	docker build -t netstack-api:latest -f docker/Dockerfile . --no-cache
 	@echo "$(GREEN)✅ 映像建置完成$(NC)"
 
 push: ## 📤 推送映像到 Registry
